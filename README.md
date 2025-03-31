@@ -1,3 +1,6 @@
+# Transfer Learning
+This forked repository aims to fine-tune the model trained in [!this repository](https://github.com/RiccardoRiccio/Fitness-AI-Trainer-With-Automatic-Exercise-Recognition-and-Counting) on the MPII Human Pose dataset, in order to classify Walking, Running, and Bicycling activities.
+
 # Personal AI Trainer With Automatic Exercise Recognition and Counting
 
 This project is an AI-powered application that leverages Computer Vision, Pose Estimation, and Machine Learning to accurately track exercise repetitions during workouts. The goal is to enhance fitness routines by providing real-time tracking through an easy-to-use web interface.
