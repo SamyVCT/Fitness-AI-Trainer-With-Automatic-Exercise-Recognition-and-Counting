@@ -1,5 +1,7 @@
 # Transfer Learning
-This forked repository aims to fine-tune the model trained in [!this repository](https://github.com/RiccardoRiccio/Fitness-AI-Trainer-With-Automatic-Exercise-Recognition-and-Counting) on the MPII Human Pose dataset, in order to classify Walking, Running, and Bicycling activities.
+This project aims to fine-tune the model trained in [this repository](https://github.com/RiccardoRiccio/Fitness-AI-Trainer-With-Automatic-Exercise-Recognition-and-Counting) on the MPII Human Pose dataset, in order to classify Walking, Running, and Bicycling activities.
+All the code used for training data collection and model fine-tuning is in the notebook TransferLearning_MPIIDataset.ipynb
+Install the environment of the original repo and add sklearn, keras-tuner.
 
 # Personal AI Trainer With Automatic Exercise Recognition and Counting
 

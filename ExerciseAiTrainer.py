@@ -9,6 +9,10 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model
 import mediapipe as mp
 import time
+from sklearn.preprocessing import LabelEncoder
+import glob
+import os
+import pickle
 
 # Initialize MediaPipe pose
 mp_pose = mp.solutions.pose
@@ -137,6 +141,8 @@ class Exercise:
     def __init__(self):
         try:
             self.lstm_model = load_model('final_forthesis_bidirectionallstm_and_encoders_exercise_classifier_model.h5')
+            # load the fine tuned model instead
+            # self.lstm_model = load_model('final_forthesis_bidirectionallstm_and_encoders_exercise_classifier_model_finetuned.h5')
         except Exception as e:
             print(f"Error loading LSTM model: {e}")
             self.lstm_model = None
@@ -236,6 +242,158 @@ class Exercise:
         cv2.putText(img, str(int(angle)),
                     tuple(np.multiply(landmark, [640, 480]).astype(int)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2, cv2.LINE_AA)
+    
+    def make_training_data(self, classes,label_encoder_path):
+        #Load processed videos
+        if os.path.exists("processed_videos.txt"):
+            print("Loading processed videos file...")
+            with open("processed_videos.txt", "r") as f:
+                processed_videos = set(f.read().splitlines())
+        else : 
+            print("No processed videos file found")
+            processed_videos = set()
+
+
+        # Define parameters
+        window_size = 30  # LSTM expects sequences of 30 frames
+        
+        # Load or initialize label encoder
+        if os.path.exists(label_encoder_path):
+            with open(label_encoder_path, "rb") as f:
+                label_encoder = pickle.load(f)
+        else:
+            label_encoder = LabelEncoder()
+
+        label_encoder.fit(classes)
+
+
+        # Loop through videos
+        for sport_label in classes:
+            # take the videos in data/sport_label folder
+            print(f"Processing {sport_label} videos...")
+            X_save_path = f"data/{sport_label}/X.pkl"
+            y_save_path = f"data/{sport_label}/y.pkl"
+            videos = glob.glob(f"data/{sport_label}/*.mp4")
+            print(f"Found {len(videos)} videos for {sport_label}")
+            for video_file in videos:
+                video_file = os.path.normpath(video_file)  # Normalize path format (had issues with // and \)
+
+                 # Skip videos already processed
+                if video_file in processed_videos:
+                    print(f"Already processed video: {video_file}")
+                    continue  # Skip if already done
+
+                print(f"Processing video: {video_file}")
+                processed_videos.add(video_file)
+
+                cap = cv2.VideoCapture(video_file)
+                landmarks_window = []
+                
+                if not cap.isOpened():
+                    print("Error opening video file.")
+                    return None  # Return None if the video cannot be opened
+                
+                pose = mp.solutions.pose.Pose()
+
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret:
+                        break  # Stop when video ends
+
+                    # Convert frame to landmarks
+                    landmarks = self.preprocess_frame(frame, pose)
+                    if not landmarks:
+                        continue  # Skip this frame
+                    if len(landmarks) == len(relevant_landmarks_indices) * 3:
+                        features = self.extract_features(landmarks)  # Ensure this returns 22 features
+                        if len(features) == 22:
+                            landmarks_window.append(features)
+
+                    # When 30 frames are collected, store in dataset
+                    if len(landmarks_window) == window_size:
+                        new_X = np.array([landmarks_window])  # Shape: (1, 30, 22)
+                        new_y = np.array([label_encoder.transform([sport_label])[0]])  # Shape: (1,)
+                        landmarks_window = []  # Reset for next sequence
+                        # Append data progressively (very important, otherwise the kernel dies)
+                        self.save_progressive_pickle(new_X, new_y, X_save_path, y_save_path)
+                        
+                        cap.release()
+
+            # Save processed videos
+            with open("processed_videos.txt", "w") as f:
+                for video_file in processed_videos:
+                    f.write(video_file + "\n")
+        # Save label encoder
+        with open(label_encoder_path, "wb") as f:
+            pickle.dump(label_encoder, f)
+
+    def save_progressive_pickle(self,new_X, new_y, X_save_path, y_save_path):
+        """Append new data to pickle files for progressive saving."""
+
+        # Save updated X data
+        with open(X_save_path, "ab") as f:
+            pickle.dump(new_X, f)
+            print(f"Saved features to {X_save_path}")
+
+        # Save updated y data
+        with open(y_save_path, "ab") as f:
+            pickle.dump(new_y, f)
+            print(f"Saved labels to {y_save_path}")
+
+
+    def classify_exercise_from_video(self, video_path):
+        cap = cv2.VideoCapture(video_path)
+        
+        if not cap.isOpened():
+            print("Error opening video file.")
+            return None  # Return None if the video cannot be opened
+
+        window_size = 30
+        landmarks_window = []
+        current_prediction = "No prediction yet"
+
+        print("Starting video classification...")
+
+        pose = mp.solutions.pose.Pose()
+
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break  # Stop when the video ends
+
+            # Extract landmarks from the frame
+            landmarks = self.preprocess_frame(frame, pose)
+            if len(landmarks) == len(relevant_landmarks_indices) * 3:
+                features = self.extract_features(landmarks)
+                if len(features) == 22:
+                    landmarks_window.append(features)
+
+            # When enough frames are collected, classify exercise
+            if len(landmarks_window) == window_size:
+                landmarks_window_np = np.array(landmarks_window).flatten().reshape(1, -1)
+                scaled_landmarks_window = self.scaler.transform(landmarks_window_np)
+                scaled_landmarks_window = scaled_landmarks_window.reshape(1, window_size, 22)
+
+                # Make prediction
+                prediction = self.lstm_model.predict(scaled_landmarks_window)
+
+                if prediction.shape[1] != len(self.exercise_classes):
+                    print(f"Unexpected prediction shape: {prediction.shape}")
+                    return None
+
+                predicted_class = np.argmax(prediction, axis=1)[0]
+
+                if predicted_class >= len(self.exercise_classes):
+                    print(f"Invalid class index: {predicted_class}")
+                    return None
+
+                current_prediction = self.exercise_classes[predicted_class]
+                print(f"Predicted Exercise: {current_prediction}")
+
+                return current_prediction  # Return the first classified exercise and exit
+
+        cap.release()
+        return current_prediction  # Return last detected exercise if loop completes
 
     # Auto classify and count method with repetition counting logic
     def auto_classify_and_count(self):
